@@ -1,0 +1,3 @@
+interface:
+  display_name: "AutoDL Instance"
+  short_description: "Manage AutoDL instances, images, and GPU migration"
