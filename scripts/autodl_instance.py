@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AutoDL sub-account container instance operations via browser-like HTTP requests."""
+"""AutoDL ordinary containers and images through direct HTTP requests."""
 
 import argparse
 import hashlib
@@ -38,7 +38,9 @@ class Client:
     def _request(self, method, path, payload=None):
         try:
             response = self.session.request(
-                method, BASE + path, json=payload, timeout=30
+                method, BASE + path,
+                **({"params": payload} if method == "GET" else {"json": payload}),
+                timeout=30, allow_redirects=False,
             )
             response.raise_for_status()
             result = response.json()
@@ -50,6 +52,10 @@ class Client:
             # Site messages can include account details; keep CLI output minimal.
             raise AutoDLError(f"{path}: {result.get('code', 'UnknownError')}")
         return result.get("data")
+
+    def api(self, method, resource, payload=None):
+        """The official client inserts sub_user for these ordinary-container APIs."""
+        return self._request(method, "/api/v1/sub_user/" + resource, payload)
 
     def login(self):
         account = os.environ.get("AUTODL_SUB_ACCOUNT", "")
@@ -112,6 +118,8 @@ class Client:
         raise AutoDLError("Instance list exceeds page limit")
 
     def power(self, action, uuid):
+        if action not in ("start", "stop"):
+            raise AutoDLError("Unknown power action")
         if not UUID_RE.fullmatch(uuid):
             raise AutoDLError("Supply an exact instance UUID")
         matches = [row for row in self.instances() if row.get("uuid") == uuid]
@@ -140,6 +148,8 @@ def public_row(row, show_ssh_password=False):
 
 
 def main(argv=None):
+    sys.modules.setdefault("autodl_instance", sys.modules[__name__])
+    from autodl_resources import add_commands, dispatch, image_billing
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     list_parser = sub.add_parser("list", help="List instances with SSH commands")
@@ -149,21 +159,27 @@ def main(argv=None):
     )
     for action in ("start", "stop"):
         sub.add_parser(action, help=f"{action.title()} one instance").add_argument("uuid")
+    add_commands(sub)
     args = parser.parse_args(argv)
 
     client = Client()
     try:
+        if args.command == "image-billing":
+            print(json.dumps(image_billing(), ensure_ascii=False, indent=2))
+            return 0
         client.login()
         if args.command == "list":
             rows = client.instances()
             result = {"total": len(rows), "instances": [
                 public_row(row, args.show_ssh_password) for row in rows
             ]}
-        else:
+        elif args.command in ("start", "stop"):
             result = client.power(args.command, args.uuid)
+        else:
+            result = dispatch(client, args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
-    except AutoDLError as exc:
+    except (AutoDLError, OSError, ValueError) as exc:
         print(f"AutoDL: {exc}", file=sys.stderr)
         return 1
     finally:

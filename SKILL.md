@@ -1,38 +1,50 @@
 ---
 name: autodl-instance
-description: Manage AutoDL container instances, create or clone a replacement when GPUs are unavailable, and save or reuse private images. Use the sub-account HTTP helper for listing and power operations, and the browser for creation, cloning, and images. Not for Container Instance Pro.
+description: Manage ordinary AutoDL container instances and private images through direct HTTP requests, including listing, power, image storage, creation, and same-region cloning. Not for Container Instance Pro.
 ---
 
-# AutoDL container instances
+# AutoDL through HTTP
 
-Manage the ordinary container instance product at https://www.autodl.com/console/instance/list. Use the exact instance UUID to identify the source; a physical host number, row position, or instance name alone is insufficient.
+Use [scripts/autodl_instance.py](scripts/autodl_instance.py) for all supported operations. Do not open or operate the browser for this skill, including as a fallback. The helper signs in with sub-account credentials; it does not extract browser cookies or tokens.
 
-## Choose the operation
+## Authentication and queries
 
-| Request | Method |
+Set `AUTODL_SUB_ACCOUNT` to `<username>@<main-account-id>` and `AUTODL_SUB_PASSWORD` in the process environment. Never put credentials in command arguments, chat, receipts, or skill files. If absent, explain that authenticated HTTP operations need these environment variables; continue local implementation or public-document work when applicable. Do not switch accounts or broaden permissions to overcome a denial.
+
+Use Python with `curl_cffi`; install it in the intended environment if necessary (`python -m pip install curl_cffi`). Resolve script paths relative to this skill, not the research repository. Commands below use `python scripts/autodl_instance.py` from the skill directory:
+
+| Task | Command |
 | --- | --- |
-| List instances, SSH command, start or stop | HTTP helper below; browser fallback when environment credentials are unavailable |
-| Rent a new instance, save or reuse an image | Browser workflow in [references/create-and-migrate.md](references/create-and-migrate.md) |
-| Cannot start because the host has no free GPU; move the experiment | Read the same reference; consider same-region cloning with the data disk first |
+| Instances and SSH commands, all pages | `list` |
+| Exact source configuration and image | `detail <instance-uuid>` |
+| Start / stop | `start <instance-uuid>` / `stop <instance-uuid>` |
+| Private/shared images visible to this sub-account | `images` |
+| Image storage usage and today's estimated charge | `image-usage` |
+| Current official image storage rules, no credentials needed | `image-billing` |
+| Region identifiers | `regions` |
+| Available hosts | `machines --region <sign> --gpu <model>` |
+| Exact host | `machines --machine-id <id>` |
+| Base image metadata | `base-image <image-uuid>` |
+| Create / clone / save / pay for a prepared order | Read the workflow below |
 
-Read the reference before creating, cloning, saving images, or migrating. It covers current UI labels, costs, disk scope, and completion checks. These operations are browser-supported; the Python helper implements only `list`, `start`, and `stop`. Do not invent additional CLI commands or mutation endpoints.
+`list` suppresses SSH passwords. Use `list --show-ssh-password` only when explicitly needed by the user, and keep that output out of shared logs. Never print full raw instance, login, or snapshot records. An empty image list describes the sub-account's visible scope; nonzero storage usage alongside it does not establish that the main account has no images.
 
-Use the available browser/computer-use tool with its documented initialization. Reuse an AutoDL tab in the correct account, or open the console. A browser session can be used without the helper's environment variables; never extract its token or cookies. If a capability is unavailable to the sub-account, report the permission limitation rather than switching accounts or expanding access.
+## Creation, cloning, and images
 
-## Listing and power operations
+Before these operations, read [references/create-and-migrate.md](references/create-and-migrate.md). It covers configuration JSON, preview fingerprints, submission receipts, costs, and completion verification. The commands are `create`, `clone`, `save-image`, `order`, and `pay-order`. New resource mutations default to read-only previews; `--execute` submits the exact reviewed configuration once. This technical preview step does not require repeatedly asking the user when their existing authorization already covers the concrete action and spending.
 
-Use [scripts/autodl_instance.py](scripts/autodl_instance.py). It uses `curl_cffi` Chrome impersonation and the site's sub-account login, ticket exchange, and instance endpoints. The script never stores a token or prints the raw instance record. Resolve script paths relative to this skill directory, not the experiment repository.
+An instruction to extend this skill authorizes local edits and read-only HTTP discovery, not creating a billed instance or image. Before a paid submission, report the concrete source/target, disks, billing mode, quote, and recurring storage charges. Ask only for a genuinely missing spending or scope decision. Preserve the source unless separately authorized to retire it. A saved image includes the system disk only; cloning must explicitly choose whether to copy the data disk.
 
-Set `AUTODL_SUB_ACCOUNT` to `<子账号用户名>@<主账户ID>` and `AUTODL_SUB_PASSWORD` to its password in the process environment. Do not place credentials in a command, skill file, or chat response. If `curl_cffi` is missing, install it in the intended Python environment (`python -m pip install curl_cffi`).
+Power changes require the user's instruction for the exact instance. After an accepted `start` or `stop`, query `list` to verify the eventual state. Starting can resume charges; stopping may release GPU allocation. Do not start a stopped source merely to test reported GPU shortage.
 
-Run `python scripts/autodl_instance.py list` to list all pages with each instance's `ssh_command`. The password is omitted by default; use `list --show-ssh-password` only when the user explicitly needs the SSH password, and keep that output out of logs and shared files. Run `python scripts/autodl_instance.py start <instance-uuid>` or `stop <instance-uuid>` only when the user has asked for that state change on the identified instance. The script checks that the UUID exists and is in the expected state before requesting the change. A successful response means the operation was accepted; query `list` again to verify its eventual state. Start can resume billing, and stopping a pay-as-you-go instance can release its GPU allocation.
+## Interface evidence and failures
 
-The endpoints are inferred from AutoDL's web client as of 2026-09-20 and may change. If a response indicates authentication or schema failure, inspect the current site behavior before updating the script. Do not extract an existing browser token, print full API responses, or retry a state-changing request after an uncertain network outcome.
+Read [references/http-api.md](references/http-api.md) when maintaining requests or diagnosing authentication/schema errors. Endpoint methods, payload fields, and sub-account routing were derived from the official public web client on 2026-09-20. Authenticated resource operations added in this revision have offline contract tests but have not been tested against a logged-in account or submitted for billing. Do not claim successful live cloning based on these tests.
 
-## Authorization and experiment continuity
+On interface changes, inspect official public documentation and JavaScript using HTTP. Do not guess mutation endpoints or probe them with dummy requests. Reject incomplete schemas and permission failures without falling back to the browser. After an uncertain mutation, reconcile the instance/image/order list and the local receipt before any retry; an unresolved request is not evidence of failure. An existing receipt prevents reuse of that receipt, not every possible duplicate made with a new filename.
 
-An instruction to extend this skill authorizes local edits and read-only inspection, not a billed test instance or a new image. For operational requests, use existing session authorization and constraints; do not ask again for an unchanged authorized action. Before a paid submission, make the selected configuration and current costs concrete. If spending scope is missing, prepare the form and ask only for the missing decision before submitting. Follow the tool's confirmation requirements for actual payment or agreement steps.
+Before resuming experiments, follow the project's own process, checkpoint, lock, and code-hash protocol. Infrastructure provisioning alone does not authorize launching training or clearing unresolved locks. Other storage mounts require separately scoped transfer work; the helper does not implement cross-instance file transfer, sharing, release, or Container Instance Pro.
 
-GPU shortage is a reason to select another eligible host, not to retry power-on indefinitely. Distinguish host inventory shortage from insufficient GPU memory for a workload, billing errors, account permissions, or service faults. Do not silently downgrade required VRAM, change architecture, or increase the spending limit.
+## Verification after changes
 
-Keep the source instance and its data until migration is verified; creating a replacement does not authorize releasing, resetting, or changing the source image. Provisioning success does not mean the experiment resumed. Follow the project's own resume protocol, locks, and process checks before launching work on the replacement, and preserve existing results and checkpoints.
+Run `python -m unittest discover -s scripts -p test_autodl_http.py` and the skill-creator `quick_validate.py` against this folder. Test new paid workflows with offline fixtures unless a specific live action is authorized. Keep fixtures synthetic and distinguish static contract evidence from live server validation.
