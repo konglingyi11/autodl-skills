@@ -157,6 +157,18 @@ class ResourceTests(unittest.TestCase):
             with self.subTest(cfg=cfg), self.assertRaises(AutoDLError):
                 resources.prepare_order(self.client, cfg)
 
+    def test_string_host_identifier_is_preserved_in_create_preview(self):
+        identifier = "fixture-host-abcdef"
+        self.client.machine["machine_id"] = identifier
+        plan = resources.prepare_order(self.client, {**self.config, "machine_id": identifier})
+        self.assertEqual(plan["payload"]["instance_info"]["machine_id"], identifier)
+        self.assertEqual(plan["payload"]["price_info"]["machine_id"], identifier)
+
+    def test_invalid_host_identifier_is_rejected(self):
+        for identifier in (True, False, 0, "", " ", None):
+            with self.subTest(identifier=identifier), self.assertRaises(AutoDLError):
+                resources.normalize_config({**self.config, "machine_id": identifier})
+
     def test_prepaid_creation_routes_to_order_endpoint(self):
         plan = resources.prepare_order(self.client, {**self.config, "charge_type": "monthly"})
         self.assertEqual(plan["resource"], "order/instance/create/prepay")
@@ -249,6 +261,9 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(kwargs["params"], {"instance_uuid": UUID})
         self.assertNotIn("json", kwargs)
         self.assertFalse(kwargs["allow_redirects"])
+        client.account_type = "main"
+        client.api("GET", "instance/snapshot", {"instance_uuid": UUID})
+        self.assertTrue(session.seen[1].endswith("/api/v1/instance/snapshot"))
 
 
 if __name__ == "__main__":

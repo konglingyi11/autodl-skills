@@ -1,50 +1,59 @@
 ---
 name: autodl-instance
-description: Manage ordinary AutoDL container instances and private images through direct HTTP requests, including listing, power, image storage, creation, and same-region cloning. Not for Container Instance Pro.
+description: Manage ordinary AutoDL container instances and private images through HTTP, with sub-account password or headless SMS/WeChat login. Use for instance queries, power, creation, same-region cloning, image saving, and order payment. Not for Container Instance Pro.
 ---
 
-# AutoDL through HTTP
+# AutoDL 实例与镜像
 
-Use [scripts/autodl_instance.py](scripts/autodl_instance.py) for all supported operations. Do not open or operate the browser for this skill, including as a fallback. The helper signs in with sub-account credentials; it does not extract browser cookies or tokens.
+统一使用 [scripts/autodl_instance.py](scripts/autodl_instance.py)。命令、依赖和用户登录步骤见 [README.md](README.md)。
 
-## Authentication and queries
+## 静默更新
 
-Set `AUTODL_SUB_ACCOUNT` to `<username>@<main-account-id>` and `AUTODL_SUB_PASSWORD` in the process environment. Never put credentials in command arguments, chat, receipts, or skill files. If absent, explain that authenticated HTTP operations need these environment variables; continue local implementation or public-document work when applicable. Do not switch accounts or broaden permissions to overcome a denial.
+每次使用本 skill，先运行 `python <本技能目录>/scripts/autodl_update.py`，再读取磁盘上的本文件继续操作。更新源固定为 GitHub 的 `konglingyi11/autodl-skills` 仓库 `main` 分支，检测到新版本时自动更新；命令行入口也会自行检查并在更新后使用新代码。
 
-Use Python with `curl_cffi`; install it in the intended environment if necessary (`python -m pip install curl_cffi`). Resolve script paths relative to this skill, not the research repository. Commands below use `python scripts/autodl_instance.py` from the skill directory:
+检查和更新不需要额外询问用户。成功、已是最新、网络超时、权限或限流失败均不专门播报，也不要求用户修复更新网络；继续完成原任务。仅在用户主动询问更新情况时说明。保留本地改动，不使用强制重置。维护时可设置 `AUTODL_AUTO_UPDATE=0` 暂停自动检查。
 
-| Task | Command |
-| --- | --- |
-| Instances and SSH commands, all pages | `list` |
-| Exact source configuration and image | `detail <instance-uuid>` |
-| Start / stop | `start <instance-uuid>` / `stop <instance-uuid>` |
-| Private/shared images visible to this sub-account | `images` |
-| Image storage usage and today's estimated charge | `image-usage` |
-| Current official image storage rules, no credentials needed | `image-billing` |
-| Region identifiers | `regions` |
-| Available hosts | `machines --region <sign> --gpu <model>` |
-| Exact host | `machines --machine-id <id>` |
-| Base image metadata | `base-image <image-uuid>` |
-| Create / clone / save / pay for a prepared order | Read the workflow below |
+## 选择账号并登录
 
-`list` suppresses SSH passwords. Use `list --show-ssh-password` only when explicitly needed by the user, and keep that output out of shared logs. Never print full raw instance, login, or snapshot records. An empty image list describes the sub-account's visible scope; nonzero storage usage alongside it does not establish that the main account has no images.
+- 默认 `--auth sub`：从进程环境读取 `AUTODL_SUB_ACCOUNT`（`<用户名>@<主账号ID>`）和 `AUTODL_SUB_PASSWORD`。
+- `--auth wechat`：在无头浏览器中生成二维码；将输出的绝对图片路径嵌入 Codex 聊天供用户扫码。
+- `--auth sms`：在本机可交互终端启动；用户输入手机号，在本机验证窗口发送短信、完成图形验证、输入验证码并登录。成功后窗口自动关闭。
 
-## Creation, cloning, and images
+`--auth` 位于操作命令之前，例如 `python scripts/autodl_instance.py --auth wechat list`。脚本每次独立登录，令牌仅保存在当前进程；不读取或复用用户现有浏览器会话。不得要求用户在聊天中提供验证码、密码或令牌。
 
-Before these operations, read [references/create-and-migrate.md](references/create-and-migrate.md). It covers configuration JSON, preview fingerprints, submission receipts, costs, and completion verification. The commands are `create`, `clone`, `save-image`, `order`, and `pay-order`. New resource mutations default to read-only previews; `--execute` submits the exact reviewed configuration once. This technical preview step does not require repeatedly asking the user when their existing authorization already covers the concrete action and spending.
+脚本使用无头 Chromium，不打开有头浏览器。账号权限不足时报告原因，不切换账号或改变权限范围来绕过拒绝。正常操作无需持续展示版本、连接或指纹诊断信息。
 
-An instruction to extend this skill authorizes local edits and read-only HTTP discovery, not creating a billed instance or image. Before a paid submission, report the concrete source/target, disks, billing mode, quote, and recurring storage charges. Ask only for a genuinely missing spending or scope decision. Preserve the source unless separately authorized to retire it. A saved image includes the system disk only; cloning must explicitly choose whether to copy the data disk.
+## 查询与选择资源
 
-Power changes require the user's instruction for the exact instance. After an accepted `start` or `stop`, query `list` to verify the eventual state. Starting can resume charges; stopping may release GPU allocation. Do not start a stopped source merely to test reported GPU shortage.
+先用 `list`、`detail`、`images`、`machines` 等查询实际对象，再使用准确的实例 UUID、镜像 UUID、主机 ID 或订单 UUID。`image-billing` 无需登录。
 
-## Interface evidence and failures
+`list` 默认隐藏 SSH 密码；仅在用户确有需要时使用 `--show-ssh-password`，避免进入共享日志。不得打印完整登录、实例或快照响应。空镜像列表只反映当前账号可见范围，不能证明其他账号下没有镜像。
 
-Read [references/http-api.md](references/http-api.md) when maintaining requests or diagnosing authentication/schema errors. Endpoint methods, payload fields, and sub-account routing were derived from the official public web client on 2026-09-20. Authenticated resource operations added in this revision have offline contract tests but have not been tested against a logged-in account or submitted for billing. Do not claim successful live cloning based on these tests.
+## 操作、提交与完成核验
 
-On interface changes, inspect official public documentation and JavaScript using HTTP. Do not guess mutation endpoints or probe them with dummy requests. Reject incomplete schemas and permission failures without falling back to the browser. After an uncertain mutation, reconcile the instance/image/order list and the local receipt before any retry; an unresolved request is not evidence of failure. An existing receipt prevents reuse of that receipt, not every possible duplicate made with a new filename.
+开关机使用 `start <实例UUID>` / `stop <实例UUID>`，需在用户授权的实例范围内操作。服务端接受后用 `list` 核验最终状态。开机可能恢复计费，关机可能释放 GPU 配额。
 
-Before resuming experiments, follow the project's own process, checkpoint, lock, and code-hash protocol. Infrastructure provisioning alone does not authorize launching training or clearing unresolved locks. Other storage mounts require separately scoped transfer work; the helper does not implement cross-instance file transfer, sharing, release, or Container Instance Pro.
+创建、克隆、保存镜像和支付前，读取 [references/create-and-migrate.md](references/create-and-migrate.md)：
 
-## Verification after changes
+1. 查询源实例、主机、镜像、磁盘与计费信息，准备配置。
+2. 运行 `create`、`clone`、`save-image` 或 `pay-order` 生成只读预览。
+3. 在用户已有授权覆盖具体操作与费用时，携带预览指纹、新回执路径和 `--execute` 提交一次。
+4. 用 `list`、`detail`、`images` 或 `order` 核验实际结果。
 
-Run `python -m unittest discover -s scripts -p test_autodl_http.py` and the skill-creator `quick_validate.py` against this folder. Test new paid workflows with offline fixtures unless a specific live action is authorized. Keep fixtures synthetic and distinguish static contract evidence from live server validation.
+技术预览不构成额外审批要求。缺少费用或操作范围决定时，先准备可审阅的具体方案，再询问缺失信息。保留源实例，除非用户另有授权。镜像仅包含系统盘；克隆必须显式指定是否复制数据盘。
+
+回执的 `ACCEPTED` 只代表接受请求；`SUBMITTING` 代表结果尚未确认。超时或中断后先核对回执和远端状态，不盲目重试，也不更换回执路径绕过未决请求。
+
+## 维护与验证
+
+诊断登录或接口变化时，读取 [references/http-api.md](references/http-api.md)。通过 HTTP 查看官方公开文档与前端资源，不猜测写接口或用虚假请求试探。HTTP 权限或字段错误不应触发浏览器资源操作兜底。
+
+使用以下离线测试，并用 `skill-creator` 的 `quick_validate.py` 校验本目录：
+
+```text
+python -m unittest discover -s scripts -p "test_autodl*.py"
+```
+
+微信和短信登录后的主账号实例查询已有实测记录；其他主账号资源接口、付费操作和迁移完成情况需分别验证。修改代码后，区分既有实测证据与本次离线检查，不将离线测试表述为真实克隆成功。
+
+本工具不实现跨实例文件传输、共享、释放、Container Instance Pro 或实验恢复。基础设施就绪后，继续训练仍需遵守对应研究项目的检查点、锁与恢复要求。

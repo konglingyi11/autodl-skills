@@ -8,6 +8,13 @@ import os
 import re
 import sys
 
+if __name__ == "__main__":
+    try:
+        from autodl_update import bootstrap
+        bootstrap()
+    except Exception:
+        pass  # Updating is best-effort and must not block the requested operation.
+
 try:
     from curl_cffi import requests
 except ImportError as exc:
@@ -28,6 +35,7 @@ class AutoDLError(Exception):
 class Client:
     def __init__(self, session=None):
         self.session = session or requests.Session(impersonate="chrome")
+        self.account_type = "sub"
         self.session.headers.update({
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
@@ -55,9 +63,29 @@ class Client:
 
     def api(self, method, resource, payload=None):
         """The official client inserts sub_user for these ordinary-container APIs."""
-        return self._request(method, "/api/v1/sub_user/" + resource, payload)
+        prefix = "sub_user/" if self.account_type == "sub" else ""
+        return self._request(method, "/api/v1/" + prefix + resource, payload)
 
-    def login(self):
+    def browser_login(self, method):
+        """Compatibility entry point for callers using the main-account login."""
+        return self.login(method)
+
+    def login(self, method="sub"):
+        if method not in ("sub", "wechat", "sms"):
+            raise AutoDLError("Unsupported authentication method")
+        # A failed new login must never leave an older account's token active.
+        self.session.headers.pop("Authorization", None)
+        self.session.headers.pop("AppVersion", None)
+        self.account_type = "sub"
+        if method == "sub":
+            self._subaccount_login()
+        else:
+            from autodl_auth import headless_login
+            result = headless_login(method)
+            self.session.headers.update({"Authorization": result.token, "AppVersion": result.version})
+            self.account_type = "main"
+
+    def _subaccount_login(self):
         account = os.environ.get("AUTODL_SUB_ACCOUNT", "")
         password = os.environ.get("AUTODL_SUB_PASSWORD", "")
         if not account or not password:
@@ -99,7 +127,7 @@ class Client:
     def instances(self):
         all_rows = []
         for page in range(1, MAX_PAGES + 1):
-            data = self._request("POST", "/api/v1/sub_user/instance", {
+            data = self.api("POST", "instance", {
                 "page_index": page,
                 "page_size": PAGE_SIZE,
                 "status": [],
@@ -129,8 +157,8 @@ class Client:
         expected = "shutdown" if action == "start" else "running"
         if status != expected:
             raise AutoDLError(f"Expected {expected} before {action}; found {status}")
-        path = f"/api/v1/sub_user/instance/power_{'on' if action == 'start' else 'off'}"
-        self._request("POST", path, {"instance_uuid": uuid})
+        resource = f"instance/power_{'on' if action == 'start' else 'off'}"
+        self.api("POST", resource, {"instance_uuid": uuid})
         return {"action": action, "uuid": uuid, "accepted": True, "previous_status": status}
 
 
@@ -151,6 +179,8 @@ def main(argv=None):
     sys.modules.setdefault("autodl_instance", sys.modules[__name__])
     from autodl_resources import add_commands, dispatch, image_billing
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--auth", choices=("sub", "wechat", "sms"), default="sub",
+                        help="Authentication: sub-account password, WeChat QR, or SMS")
     sub = parser.add_subparsers(dest="command", required=True)
     list_parser = sub.add_parser("list", help="List instances with SSH commands")
     list_parser.add_argument(
@@ -167,7 +197,7 @@ def main(argv=None):
         if args.command == "image-billing":
             print(json.dumps(image_billing(), ensure_ascii=False, indent=2))
             return 0
-        client.login()
+        client.login(args.auth)
         if args.command == "list":
             rows = client.instances()
             result = {"total": len(rows), "instances": [
@@ -179,6 +209,9 @@ def main(argv=None):
             result = dispatch(client, args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
+    except KeyboardInterrupt:
+        print("AutoDL: 已取消", file=sys.stderr)
+        return 130
     except (AutoDLError, OSError, ValueError) as exc:
         print(f"AutoDL: {exc}", file=sys.stderr)
         return 1

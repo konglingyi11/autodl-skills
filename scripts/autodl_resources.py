@@ -55,6 +55,15 @@ def integer(value, label, minimum=0):
     return value
 
 
+def machine_identifier(value):
+    """Preserve string host IDs as well as legacy numeric IDs."""
+    if type(value) is int and value >= 1:
+        return value
+    if isinstance(value, str) and value.strip():
+        return value
+    raise AutoDLError("machine_id must be a non-empty host identifier")
+
+
 def paginated(client, resource, filters=None):
     rows = []
     for page in range(1, MAX_PAGES + 1):
@@ -171,7 +180,7 @@ def normalize_config(config, clone=False):
     if set(config) - allowed:
         raise AutoDLError("Unknown configuration fields")
     result = {
-        "machine_id": integer(config.get("machine_id"), "machine_id", 1),
+        "machine_id": machine_identifier(config.get("machine_id")),
         "gpu_count": integer(config.get("gpu_count", 1), "gpu_count", 1),
         "charge_type": config.get("charge_type", "payg"),
         "duration": integer(config.get("duration", 1), "duration", 1),
@@ -438,7 +447,7 @@ def add_commands(sub):
     machine = sub.add_parser("machines", help="List hosts, available GPUs, and disk limits")
     machine.add_argument("--region", default="")
     machine.add_argument("--gpu", default="")
-    machine.add_argument("--machine-id", type=int)
+    machine.add_argument("--machine-id")
     machine.add_argument("--charge-type", choices=BILLING, default="payg")
     base = sub.add_parser("base-image", help="Read a specified base image")
     base.add_argument("uuid")
@@ -466,7 +475,7 @@ def dispatch(client, args):
     if command == "images":
         rows = images(client)
         return {"total": len(rows), "images": [select(row, IMAGE_FIELDS) for row in rows],
-                "storage": usage(client), "scope": "Images visible to the authenticated sub-account"}
+                "storage": usage(client), "scope": "Images visible to the authenticated account"}
     if command == "image-usage":
         return usage(client)
     if command == "regions":

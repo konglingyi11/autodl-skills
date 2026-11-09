@@ -10,3 +10,5 @@ venv/
 .ruff_cache/
 .idea/
 .vscode/
+.autodl-update.json
+.autodl-update.lock
