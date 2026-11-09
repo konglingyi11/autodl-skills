@@ -1,6 +1,6 @@
 {
   "files": {
-    "README.md": "0ae7812cfbe0b9e84971f4ad9872369511737a867c4e848d2eb69e6c99cb9f78",
+    "README.md": "65c6d8bca688cbd9725ca0309a5f3caba3d33d48d8890f0d79c9151f7743bc50",
     "SKILL.md": "b56e2a4941842749874e55895c13c9b816b600aabaab4495febafdace08b24bf",
     "agents/openai.yaml": "1c3c9eda54c422ba887ed47a5d27fb125bf74aa956a89090015aff87c0fbde73",
     "references/create-and-migrate.md": "d9ae72066e361920c7304114ce793d4175ac554ae6ddfd3451ce2d81a1f77004",

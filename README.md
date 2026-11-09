@@ -34,6 +34,20 @@
 
 ### 安装到 Codex
 
+将下面这段提示词复制给 Codex，即可完成安装：
+
+```text
+请从 https://github.com/konglingyi11/autodl-skills 的 main 分支安装 autodl-instance 技能。
+仓库根目录就是技能目录，安装到 $CODEX_HOME/skills/autodl-instance；未设置 CODEX_HOME 时使用 ~/.codex/skills/autodl-instance。
+请安装 curl_cffi、playwright、pillow 和 Playwright Chromium，并检查短信登录所需的 tkinter。
+如果已经安装，请保留本地改动并更新；完成后通过 --help 验证命令行入口，并说明如何调用技能。
+```
+
+安装完成后，在下一次对话中调用 `$autodl-instance`。
+
+<details>
+<summary><strong>手动安装（PowerShell）</strong></summary>
+
 在 PowerShell 中运行：
 
 ```powershell
@@ -48,6 +62,8 @@ python -m playwright install chromium
 ```
 
 短信登录还需要 tkinter，常规 Windows Python 安装已包含；缺少时在 Python 安装程序中启用 Tcl/Tk。仅使用子账号 HTTP 登录时，安装 `curl_cffi` 即可。
+
+</details>
 
 ### 在 Codex 中使用
 
