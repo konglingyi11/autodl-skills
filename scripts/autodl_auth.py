@@ -1,6 +1,7 @@
 """Headless main-account login; credentials stay inside the current process."""
 
 import getpass
+from contextlib import contextmanager
 import io
 import sys
 import tempfile
@@ -137,6 +138,7 @@ class SmsLoginWindow:
         return self.session
 
 
+@contextmanager
 def headless_login(method):
     if method not in ("wechat", "sms"):
         raise AutoDLError("不支持的主账号登录方式")
@@ -156,29 +158,29 @@ def headless_login(method):
             browser = playwright.chromium.launch(
                 headless=True, args=["--disable-blink-features=AutomationControlled"])
             try:
-                probe = browser.new_page()
-                user_agent = probe.evaluate("navigator.userAgent").replace("HeadlessChrome/", "Chrome/")
-                probe.close()
-                page = browser.new_page(viewport=VIEWPORT, user_agent=user_agent)
+                page = browser.new_page(viewport=VIEWPORT)
                 page.goto(BASE + ("/wx-login" if method == "wechat" else "/login"),
                           wait_until="domcontentloaded", timeout=30000)
                 if method == "sms":
                     page.get_by_text("短信登录", exact=True).click()
                     page.locator('input[name="phone"]').fill(phone)
                     # Sending SMS remains an explicit user action in the window.
-                    return SmsLoginWindow(page, time.monotonic() + LOGIN_TIMEOUT_SECONDS).run()
-                qr = page.locator(".wx img")
-                qr.wait_for(state="visible", timeout=30000)
-                page.wait_for_function("""() => {
+                    SmsLoginWindow(page, time.monotonic() + LOGIN_TIMEOUT_SECONDS).run()
+                else:
+                    qr = page.locator(".wx img")
+                    qr.wait_for(state="visible", timeout=30000)
+                    page.wait_for_function("""() => {
                     const image = document.querySelector('.wx img');
                     return image && image.complete && image.naturalWidth > 0;
                 }""", timeout=30000)
-                path = Path(temp) / "wechat-qr.png"
-                qr.screenshot(path=str(path))
-                print(f"请用微信扫描二维码：{path}\n等待登录完成（最多 5 分钟）…",
-                      file=sys.stderr, flush=True)
-                page.wait_for_function(SESSION_SCRIPT, timeout=LOGIN_TIMEOUT_SECONDS * 1000)
-                return read_session(page)
+                    path = Path(temp) / "wechat-qr.png"
+                    qr.screenshot(path=str(path))
+                    print(f"请用微信扫描二维码：{path}\n等待登录完成（最多 5 分钟）…",
+                          file=sys.stderr, flush=True)
+                    page.wait_for_function(SESSION_SCRIPT, timeout=LOGIN_TIMEOUT_SECONDS * 1000)
+                if not read_session(page):
+                    raise AutoDLError("登录结果缺少会话，请重新登录")
+                yield page
             finally:
                 browser.close()
     except PlaywrightTimeout as exc:

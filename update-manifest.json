@@ -1,16 +1,17 @@
 {
   "files": {
-    "README.md": "65c6d8bca688cbd9725ca0309a5f3caba3d33d48d8890f0d79c9151f7743bc50",
+    "README.md": "dd3fd4a16f37368adb234dc7bb094baeb0ace6dfb77d4cefe13cc42d7db41d51",
     "SKILL.md": "b56e2a4941842749874e55895c13c9b816b600aabaab4495febafdace08b24bf",
     "agents/openai.yaml": "1c3c9eda54c422ba887ed47a5d27fb125bf74aa956a89090015aff87c0fbde73",
     "references/create-and-migrate.md": "d9ae72066e361920c7304114ce793d4175ac554ae6ddfd3451ce2d81a1f77004",
-    "references/http-api.md": "99a38303040b271c005a31863cd9c48edb17f394c0ab29001ac0c06e3ed23418",
-    "scripts/autodl_auth.py": "50ac5d938927855bd0c489cdf745b43aa2d31fa17d5584c18eb09aa769509c97",
-    "scripts/autodl_instance.py": "83adec3adaa278bd5892187adfb19ed41917f0eb666f35541140b9e5c7a2cde8",
-    "scripts/autodl_resources.py": "014f89d1452fa1e23bda1e7c938d0e2bae00534ad94df6ddf7ffc69206a8cb8c",
+    "references/http-api.md": "d073d7b4e5a39772029a58c6a1be0a439234d5a0e16ab54aa62b2d8c2504f4a9",
+    "scripts/autodl_auth.py": "d4fdd29e94969c7dc5ba4a79a4ab00050a9b712d04092893ea0b7c37263f292b",
+    "scripts/autodl_instance.py": "216fcb66c8143a0828c11494c8c74d73dbb111576424f5c6c8bc100f6d2e9c16",
+    "scripts/autodl_resources.py": "a7f134e99a091b8cdf49d4af21e12610a69bfffaae06780421ee22fb87feae8d",
     "scripts/autodl_update.py": "931a007f656de9a04cb8e6cf6b27145f1890dce87b3ddb26cdf6752c49fff5e4",
-    "scripts/test_autodl_auth.py": "e001ffd53bcba2f150c25a363b4ebedd04a758dedbe26237b0f379f52092c8cd",
+    "scripts/test_autodl_auth.py": "d6a6157f5b7eea6748399ba10aad803295d1ad1439da2775382457382fbacdde",
     "scripts/test_autodl_http.py": "5e1bf064fc9ad13db922e8fd13dae15487959e93c1309e19d6a218b84615d36d",
+    "scripts/test_autodl_local.py": "be2b3a458a8458dc1484583f085b540047dae48825561dd21e4b9333356759e9",
     "scripts/test_autodl_update.py": "2c28e9bda84b416f46388c9d18cf5db0e5ac723b79ade336e08709618b4c6566"
   },
   "schema": 1

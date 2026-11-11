@@ -26,6 +26,18 @@ BASE = "https://www.autodl.com"
 UUID_RE = re.compile(r"^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9a-fA-F]{10}-[0-9a-fA-F]{8})$")
 PAGE_SIZE = 10
 MAX_PAGES = 1000
+HTTP_CHROME_MAJOR = "120"
+HTTP_CHROME_VERSION = HTTP_CHROME_MAJOR + ".0.0.0"
+HTTP_PROFILE = "chrome" + HTTP_CHROME_MAJOR
+HTTP_OS = "Windows"
+HTTP_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   f"(KHTML, like Gecko) Chrome/{HTTP_CHROME_VERSION} Safari/537.36"),
+    "Sec-CH-UA": f'"Not_A Brand";v="8", "Chromium";v="{HTTP_CHROME_MAJOR}", "Google Chrome";v="{HTTP_CHROME_MAJOR}"',
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": f'"{HTTP_OS}"',
+    "Accept-Language": "zh-CN,zh;q=0.9",
+}
 
 
 class AutoDLError(Exception):
@@ -34,9 +46,12 @@ class AutoDLError(Exception):
 
 class Client:
     def __init__(self, session=None):
-        self.session = session or requests.Session(impersonate="chrome")
+        self.session = session or requests.Session(impersonate=HTTP_PROFILE)
+        self.browser_context = None
+        self.page = None
         self.account_type = "sub"
         self.session.headers.update({
+            **HTTP_HEADERS,
             "Accept": "application/json, text/plain, */*",
             "Content-Type": "application/json",
             "Origin": BASE,
@@ -44,6 +59,33 @@ class Client:
         })
 
     def _request(self, method, path, payload=None):
+        if self.page is not None:
+            try:
+                result = self.page.evaluate("""async ({method, path, payload, origin}) => {
+                    if (location.origin !== origin || !path.startsWith('/api/v1/'))
+                        throw new Error('Invalid origin or path');
+                    const url = new URL(path, location.origin);
+                    const headers = {'Accept': 'application/json, text/plain, */*',
+                                     'Content-Type': 'application/json',
+                                     'Authorization': localStorage.getItem('token'),
+                                     'AppVersion': JSON.parse(localStorage.getItem('app_version')).version};
+                    if (!headers.Authorization || !headers.AppVersion) throw new Error('Missing session');
+                    if (method === 'GET' && payload) {
+                        for (const [key, value] of Object.entries(payload)) url.searchParams.set(key, value);
+                    }
+                    const controller = new AbortController();
+                    const timer = setTimeout(() => controller.abort(), 30000);
+                    try {
+                        const response = await fetch(url, {method, headers, credentials: 'same-origin',
+                            redirect: 'error', signal: controller.signal,
+                            ...(method === 'GET' ? {} : {body: JSON.stringify(payload)})});
+                        if (!response.ok) throw new Error('HTTP error');
+                        return await response.json();
+                    } finally { clearTimeout(timer); }
+                }""", {"method": method, "path": path, "payload": payload, "origin": BASE})
+            except Exception as exc:
+                raise AutoDLError(f"Request failed for {path}: {type(exc).__name__}") from exc
+            return self._result(path, result)
         try:
             response = self.session.request(
                 method, BASE + path,
@@ -54,6 +96,9 @@ class Client:
             result = response.json()
         except (requests.RequestsError, ValueError) as exc:
             raise AutoDLError(f"Request failed for {path}: {type(exc).__name__}") from exc
+        return self._result(path, result)
+
+    def _result(self, path, result):
         if not isinstance(result, dict):
             raise AutoDLError(f"Unexpected response for {path}")
         if result.get("code") != "Success":
@@ -74,6 +119,9 @@ class Client:
         if method not in ("sub", "wechat", "sms"):
             raise AutoDLError("Unsupported authentication method")
         # A failed new login must never leave an older account's token active.
+        if self.browser_context is not None:
+            self.browser_context.__exit__(None, None, None)
+            self.browser_context, self.page = None, None
         self.session.headers.pop("Authorization", None)
         self.session.headers.pop("AppVersion", None)
         self.account_type = "sub"
@@ -81,9 +129,18 @@ class Client:
             self._subaccount_login()
         else:
             from autodl_auth import headless_login
-            result = headless_login(method)
-            self.session.headers.update({"Authorization": result.token, "AppVersion": result.version})
+            context = headless_login(method)
+            self.page = context.__enter__()
+            self.browser_context = context
             self.account_type = "main"
+
+    def close(self):
+        try:
+            if self.browser_context is not None:
+                self.browser_context.__exit__(None, None, None)
+                self.browser_context, self.page = None, None
+        finally:
+            self.session.close()
 
     def _subaccount_login(self):
         account = os.environ.get("AUTODL_SUB_ACCOUNT", "")
@@ -115,8 +172,8 @@ class Client:
         passport_data = self._request("POST", "/api/v1/sub_user/passport", {
             "ticket": ticket,
             "device": {
-                "os": {"name": "Windows"},
-                "browser": {"name": "Chrome", "version": "120.0.0.0", "major": "120"},
+                "os": {"name": HTTP_OS},
+                "browser": {"name": "Chrome", "version": HTTP_CHROME_VERSION, "major": HTTP_CHROME_MAJOR},
             },
         })
         token = passport_data.get("token") if isinstance(passport_data, dict) else None
@@ -216,7 +273,7 @@ def main(argv=None):
         print(f"AutoDL: {exc}", file=sys.stderr)
         return 1
     finally:
-        client.session.close()
+        client.close()
 
 
 if __name__ == "__main__":

@@ -20,17 +20,20 @@ class AuthenticationTests(unittest.TestCase):
         self.client = Client(self.transport)
 
     def test_main_login_routes_and_hands_off_session(self):
-        with patch("autodl_auth.headless_login", return_value=LoginSession("secret", "v1")) as login:
+        browser = MagicMock()
+        with patch("autodl_auth.headless_login", return_value=browser) as login:
             self.client.login("wechat")
         login.assert_called_once_with("wechat")
         self.assertEqual(self.client.account_type, "main")
-        self.assertEqual(self.transport.headers["Authorization"], "secret")
-        self.assertEqual(self.transport.headers["AppVersion"], "v1")
+        self.assertIs(self.client.page, browser.__enter__.return_value)
+        self.assertNotIn("Authorization", self.transport.headers)
 
     def test_failed_login_does_not_reuse_previous_account(self):
         self.client.account_type = "main"
         self.transport.headers.update(Authorization="old-secret", AppVersion="v0")
-        with patch("autodl_auth.headless_login", side_effect=AutoDLError("cancelled")):
+        browser = MagicMock()
+        browser.__enter__.side_effect = AutoDLError("cancelled")
+        with patch("autodl_auth.headless_login", return_value=browser):
             with self.assertRaises(AutoDLError):
                 self.client.login("sms")
         self.assertNotIn("Authorization", self.transport.headers)
@@ -63,15 +66,14 @@ class AuthenticationTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main(["--auth", "sms", "image-billing"]), 0)
         client.return_value.login.assert_not_called()
-        client.return_value.session.close.assert_called_once_with()
+        client.return_value.close.assert_called_once_with()
 
     def test_wechat_qr_is_temporary_and_browser_always_closes(self):
         # Fake the optional dependency so these tests still run without Chromium.
         for fail in (False, True):
             with self.subTest(timeout=fail):
-                browser, probe, page = Mock(), Mock(), Mock()
-                browser.new_page.side_effect = [probe, page]
-                probe.evaluate.return_value = "HeadlessChrome/123"
+                browser, page = Mock(), Mock()
+                browser.new_page.return_value = page
                 page.evaluate.return_value = {"token": "secret", "version": "v1"}
                 saved = []
 
@@ -91,9 +93,12 @@ class AuthenticationTests(unittest.TestCase):
                         contextlib.redirect_stderr(io.StringIO()):
                     if fail:
                         with self.assertRaisesRegex(AutoDLError, "超时"):
-                            headless_login("wechat")
+                            with headless_login("wechat"):
+                                pass
                     else:
-                        self.assertEqual(headless_login("wechat"), LoginSession("secret", "v1"))
+                        with headless_login("wechat") as active_page:
+                            self.assertIs(active_page, page)
+                            browser.close.assert_not_called()
                 self.assertTrue(runtime.chromium.launch.call_args.kwargs["headless"])
                 self.assertEqual(len(saved), 1)
                 self.assertFalse(saved[0].exists())

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 
-from autodl_instance import AutoDLError, BASE, MAX_PAGES, PAGE_SIZE, UUID_RE, public_row, requests
+from autodl_instance import AutoDLError, BASE, HTTP_HEADERS, HTTP_PROFILE, MAX_PAGES, PAGE_SIZE, UUID_RE, public_row, requests
 
 GIB = 1024 ** 3
 BILLING = ("payg", "daily", "weekly", "monthly")
@@ -104,7 +104,7 @@ def image_billing():
     """Read the image section of official pricing documentation using unauthenticated HTTP."""
     url = BASE + "/docs/price/"
     try:
-        response = requests.get(url, impersonate="chrome", timeout=30, allow_redirects=False)
+        response = requests.get(url, impersonate=HTTP_PROFILE, headers=HTTP_HEADERS, timeout=30, allow_redirects=False)
         response.raise_for_status()
     except requests.RequestsError as exc:
         raise AutoDLError("Could not read official image billing rules") from exc
