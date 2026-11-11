@@ -1,4 +1,4 @@
-"""Headless main-account login; credentials stay inside the current process."""
+"""Headless main-account login and restoration of encrypted browser state."""
 
 import getpass
 from contextlib import contextmanager
@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from autodl_instance import AutoDLError, BASE
+from autodl_instance import AutoDLError, AuthenticationExpired, BASE
 
 
 LOGIN_TIMEOUT_SECONDS = 300
@@ -40,6 +40,35 @@ class LoginSession:
 def read_session(page):
     data = page.evaluate(SESSION_SCRIPT)
     return LoginSession(data.get("token"), data.get("version")) if data else None
+
+
+def browser_state(page):
+    state = page.context.storage_state()
+    state['cookies'] = [cookie for cookie in state['cookies']
+                        if cookie.get('domain', '').lstrip('.') in ('autodl.com', 'www.autodl.com')]
+    state['origins'] = [origin for origin in state['origins'] if origin.get('origin') == BASE]
+    return state
+
+
+@contextmanager
+def restore_browser(state):
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True, args=['--disable-blink-features=AutomationControlled'])
+            try:
+                context = browser.new_context(viewport=VIEWPORT, storage_state=state)
+                page = context.new_page()
+                page.goto(BASE + '/console/instance/list', wait_until='domcontentloaded', timeout=30000)
+                if not read_session(page):
+                    raise AuthenticationExpired('已保存的登录会话失效')
+                yield page
+            finally:
+                browser.close()
+    except (AutoDLError, AuthenticationExpired):
+        raise
+    except Exception as exc:
+        raise AutoDLError(f'恢复登录会话失败：{type(exc).__name__}') from exc
 
 
 class SmsLoginWindow:

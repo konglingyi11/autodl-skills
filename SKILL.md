@@ -16,10 +16,12 @@ description: Manage ordinary AutoDL container instances and private images throu
 ## 选择账号并登录
 
 - 默认 `--auth sub`：从进程环境读取 `AUTODL_SUB_ACCOUNT`（`<用户名>@<主账号ID>`）和 `AUTODL_SUB_PASSWORD`。
-- `--auth wechat`：在无头浏览器中生成二维码；将输出的绝对图片路径嵌入 Codex 聊天供用户扫码。
-- `--auth sms`：在本机可交互终端启动；用户输入手机号，在本机验证窗口发送短信、完成图形验证、输入验证码并登录。成功后窗口自动关闭。
+- `--auth wechat`：首次或会话失效时在无头浏览器中生成二维码；将输出的绝对图片路径嵌入 Codex 聊天供用户扫码。
+- `--auth sms`：首次或会话失效时在本机可交互终端启动；用户输入手机号，在本机验证窗口发送短信、完成图形验证、输入验证码并登录。成功后窗口自动关闭。
 
-`--auth` 位于操作命令之前，例如 `python scripts/autodl_instance.py --auth wechat list`。脚本每次独立登录，令牌仅保存在当前进程；不读取或复用用户现有浏览器会话。不得要求用户在聊天中提供验证码、密码或令牌。
+账号密码类登录优先使用环境变量。缺少子账号凭据时，建议用户在本机配置 `AUTODL_SUB_ACCOUNT` 和 `AUTODL_SUB_PASSWORD`，并确保运行命令的进程能够读取；配置示例见 README。用户需要长期使用时，可选择保存为用户级环境变量。不要要求用户把凭据发到聊天中。
+
+`--auth` 位于操作命令之前，例如 `python scripts/autodl_instance.py --auth wechat list`。Windows 上成功登录后将会话用当前 Windows 用户的 DPAPI 加密保存在本机；后续命令自动恢复并用只读实例查询检查，明确失效时才重新登录。各登录方式独立保存；子账号按 `AUTODL_SUB_ACCOUNT` 隔离，恢复时不需要密码。使用 `--fresh-login` 切换账号或重新登录；`--auth <方式> logout` 删除该方式的本地会话，不撤销服务端会话。其他系统暂不保存会话。不读取用户现有浏览器会话，不得要求用户在聊天中提供验证码、密码或令牌。
 
 脚本使用无头 Chromium，不打开有头浏览器。账号权限不足时报告原因，不切换账号或改变权限范围来绕过拒绝。正常操作无需持续展示版本、连接或指纹诊断信息。
 

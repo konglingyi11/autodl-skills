@@ -16,12 +16,18 @@ from autodl_auth import LoginSession, SmsLoginWindow, headless_login, read_sessi
 
 class AuthenticationTests(unittest.TestCase):
     def setUp(self):
-        self.transport = SimpleNamespace(headers={})
+        self.env = patch.dict(os.environ, {'AUTODL_SUB_ACCOUNT': 'fixture@123', 'AUTODL_SUB_PASSWORD': 'fixture'})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.transport = SimpleNamespace(headers={}, cookies=SimpleNamespace(jar=[]))
         self.client = Client(self.transport)
+        self.client.store = Mock()
+        self.client.store.load.return_value = None
 
     def test_main_login_routes_and_hands_off_session(self):
         browser = MagicMock()
-        with patch("autodl_auth.headless_login", return_value=browser) as login:
+        with patch("autodl_auth.headless_login", return_value=browser) as login, \
+                patch('autodl_auth.browser_state', return_value={'cookies': [], 'origins': []}):
             self.client.login("wechat")
         login.assert_called_once_with("wechat")
         self.assertEqual(self.client.account_type, "main")
@@ -40,7 +46,9 @@ class AuthenticationTests(unittest.TestCase):
         self.assertNotIn("AppVersion", self.transport.headers)
 
     def test_default_login_preserves_subaccount_flow(self):
-        with patch.object(self.client, "_subaccount_login") as login, \
+        def login_values():
+            self.transport.headers.update(Authorization='synthetic', AppVersion='v1')
+        with patch.object(self.client, "_subaccount_login", side_effect=login_values) as login, \
                 patch("autodl_auth.headless_login") as browser:
             self.client.login()
         login.assert_called_once_with()

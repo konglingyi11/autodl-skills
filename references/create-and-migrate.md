@@ -1,6 +1,6 @@
 # 创建、克隆与保存镜像
 
-下文命令均从 skill 根目录运行。默认使用子账号环境变量登录；主账号在命令前加 `--auth wechat` 或 `--auth sms`，每次执行单独登录。登录步骤见 [README](../README.md)，接口依据见 [HTTP 接口与证据](http-api.md)。
+下文命令均从 skill 根目录运行。默认使用子账号环境变量登录；主账号在命令前加 `--auth wechat` 或 `--auth sms`。Windows 上会优先恢复加密保存的会话。登录步骤见 [README](../README.md)，接口依据见 [HTTP 接口与证据](http-api.md)。
 
 ## 1. 查询并准备配置
 

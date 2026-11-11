@@ -88,12 +88,12 @@ python scripts/autodl_instance.py --auth wechat list
 统一命令格式：
 
 ```text
-python scripts/autodl_instance.py [--auth sub|wechat|sms] <命令> [参数]
+python scripts/autodl_instance.py [--auth sub|wechat|sms] [--fresh-login] <命令> [参数]
 ```
 
 ## 登录方式
 
-`--auth` 放在操作命令之前。每次命令独立登录，令牌仅保存在当前进程，退出时关闭浏览器并清理临时二维码。
+`--auth` 放在操作命令之前。Windows 上首次登录后会将会话加密保存在本机，后续命令自动恢复并检查；会话失效时需要重新登录。命令退出时关闭浏览器并清理临时二维码。
 
 | 方式 | 命令示例 | 操作 |
 | --- | --- | --- |
@@ -103,7 +103,26 @@ python scripts/autodl_instance.py [--auth sub|wechat|sms] <命令> [参数]
 
 ### 微信扫码
 
-脚本使用无头 Chromium，输出二维码图片的绝对路径，由 Codex 助手显示到聊天中。微信扫码后自动执行原命令，最多等待 5 分钟；过期后重新运行命令获取新二维码。
+需要登录时，脚本使用无头 Chromium，输出二维码图片的绝对路径，由 Codex 助手显示到聊天中。微信扫码后自动执行原命令，最多等待 5 分钟；过期后重新运行命令获取新二维码。
+
+### 会话保存与切换
+
+Windows 使用当前用户的 DPAPI 加密会话，保存在 `%LOCALAPPDATA%\autodl-skill\sessions`。微信、短信与子账号分别保存，子账号按 `AUTODL_SUB_ACCOUNT` 隔离；已保存的子账号会话有效时仍需设置账号变量，但无需密码。密码不会写入会话文件。会话失效后，子账号从环境变量重新登录，微信或短信需重新完成验证。
+
+切换账号或手动重新登录时，在操作前使用 `--fresh-login`：
+
+```powershell
+python scripts/autodl_instance.py --auth wechat --fresh-login list
+```
+
+删除当前登录方式的本机会话：
+
+```powershell
+python scripts/autodl_instance.py --auth wechat logout
+python scripts/autodl_instance.py --auth sub logout
+```
+
+子账号删除操作使用当前的 `AUTODL_SUB_ACCOUNT`。该命令仅删除本地会话，不撤销服务端会话。无法安全保存时会提示；非 Windows 当前不支持持久化会话。若服务器返回无法识别的认证错误，可使用 `--fresh-login` 重新登录。
 
 ### 短信验证码
 
@@ -116,7 +135,7 @@ python scripts/autodl_instance.py [--auth sub|wechat|sms] <命令> [参数]
 <details>
 <summary><strong>配置子账号环境变量</strong></summary>
 
-子账号格式为 `<用户名>@<主账号ID>`。在当前 PowerShell 会话中配置：
+子账号格式为 `<用户名>@<主账号ID>`。建议将账号和密码提供给环境变量，让命令直接读取。在当前 PowerShell 会话中配置：
 
 ```powershell
 $env:AUTODL_SUB_ACCOUNT = Read-Host "子账号（用户名@主账号ID）"
@@ -124,7 +143,16 @@ $env:AUTODL_SUB_PASSWORD = [System.Net.NetworkCredential]::new("", (Read-Host "�
 python scripts/autodl_instance.py list
 ```
 
-密码从隐藏输入读取到进程环境中，供 HTTP 登录使用。凭据、实例密码与 `.env` 文件应保留在仓库之外。
+密码从隐藏输入读取到进程环境中，供 HTTP 登录使用；这种配置只在当前进程及其子进程中有效。需要长期使用时，也可以在 Windows 中保存为用户级环境变量：
+
+```powershell
+[Environment]::SetEnvironmentVariable("AUTODL_SUB_ACCOUNT", (Read-Host "子账号（用户名@主账号ID）"), "User")
+$autodlPassword = [System.Net.NetworkCredential]::new("", (Read-Host "子账号密码" -AsSecureString)).Password
+[Environment]::SetEnvironmentVariable("AUTODL_SUB_PASSWORD", $autodlPassword, "User")
+Remove-Variable autodlPassword
+```
+
+用户级环境变量通常会在新启动的终端或 Codex 中生效；已运行的进程不会自动获得更新。环境变量不是加密的凭据保险箱，请按本机使用环境选择保存方式。凭据、实例密码与 `.env` 文件应保留在仓库之外。
 
 </details>
 
@@ -254,6 +282,7 @@ autodl-skills/
 ├── scripts/
 │   ├── autodl_instance.py           命令行、HTTP 客户端与实例操作
 │   ├── autodl_auth.py               无头登录、二维码与短信窗口
+│   ├── autodl_session.py            本机会话加密保存与恢复
 │   ├── autodl_resources.py          查询、预览、提交与回执
 │   ├── autodl_update.py             静默更新与发行清单生成
 │   └── test_autodl*.py              离线与本地集成检查

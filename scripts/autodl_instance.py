@@ -44,9 +44,15 @@ class AutoDLError(Exception):
     pass
 
 
+class AuthenticationExpired(AutoDLError):
+    pass
+
+
 class Client:
     def __init__(self, session=None):
+        from autodl_session import SessionStore
         self.session = session or requests.Session(impersonate=HTTP_PROFILE)
+        self.store = SessionStore()
         self.browser_context = None
         self.page = None
         self.account_type = "sub"
@@ -79,12 +85,15 @@ class Client:
                         const response = await fetch(url, {method, headers, credentials: 'same-origin',
                             redirect: 'error', signal: controller.signal,
                             ...(method === 'GET' ? {} : {body: JSON.stringify(payload)})});
+                        if (response.status === 401) return {__autodl_http_401: true};
                         if (!response.ok) throw new Error('HTTP error');
                         return await response.json();
                     } finally { clearTimeout(timer); }
                 }""", {"method": method, "path": path, "payload": payload, "origin": BASE})
             except Exception as exc:
                 raise AutoDLError(f"Request failed for {path}: {type(exc).__name__}") from exc
+            if isinstance(result, dict) and result.get('__autodl_http_401') is True:
+                raise AuthenticationExpired('登录会话已失效')
             return self._result(path, result)
         try:
             response = self.session.request(
@@ -92,6 +101,8 @@ class Client:
                 **({"params": payload} if method == "GET" else {"json": payload}),
                 timeout=30, allow_redirects=False,
             )
+            if getattr(response, 'status_code', None) == 401:
+                raise AuthenticationExpired('登录会话已失效')
             response.raise_for_status()
             result = response.json()
         except (requests.RequestsError, ValueError) as exc:
@@ -101,6 +112,8 @@ class Client:
     def _result(self, path, result):
         if not isinstance(result, dict):
             raise AutoDLError(f"Unexpected response for {path}")
+        if result.get('code') == 'AuthorizeFailed':
+            raise AuthenticationExpired('登录会话已失效')
         if result.get("code") != "Success":
             # Site messages can include account details; keep CLI output minimal.
             raise AutoDLError(f"{path}: {result.get('code', 'UnknownError')}")
@@ -115,7 +128,7 @@ class Client:
         """Compatibility entry point for callers using the main-account login."""
         return self.login(method)
 
-    def login(self, method="sub"):
+    def login(self, method="sub", fresh=False):
         if method not in ("sub", "wechat", "sms"):
             raise AutoDLError("Unsupported authentication method")
         # A failed new login must never leave an older account's token active.
@@ -125,6 +138,42 @@ class Client:
         self.session.headers.pop("Authorization", None)
         self.session.headers.pop("AppVersion", None)
         self.account_type = "sub"
+        from autodl_session import SessionStoreError
+        account = os.environ.get('AUTODL_SUB_ACCOUNT', '') if method == 'sub' else ''
+        if method == 'sub' and (not account or '@' not in account):
+            raise AutoDLError('Set AUTODL_SUB_ACCOUNT to <username>@<main-account-id>')
+        if fresh:
+            self.store.clear(method, account)
+        try:
+            saved = None if fresh else self.store.load(method, account)
+        except SessionStoreError as exc:
+            raise AutoDLError(str(exc)) from exc
+        if saved is not None:
+            try:
+                if method == 'sub':
+                    if not isinstance(saved, dict) or not isinstance(saved.get('token'), str) or not isinstance(saved.get('version'), str):
+                        raise AuthenticationExpired('已保存的登录会话无效')
+                    self.session.headers.update({'Authorization': saved['token'], 'AppVersion': saved['version']})
+                    for cookie in saved.get('cookies', []):
+                        self.session.cookies.set(cookie['name'], cookie['value'], domain=cookie['domain'], path=cookie['path'])
+                else:
+                    from autodl_auth import restore_browser
+                    context = restore_browser(saved)
+                    self.page = context.__enter__()
+                    self.browser_context = context
+                    self.account_type = 'main'
+                self.instances()  # Only a read-only request may trigger reauthentication.
+                self._save_session(method, account)
+                return
+            except AuthenticationExpired:
+                if self.browser_context is not None:
+                    self.browser_context.__exit__(None, None, None)
+                self.browser_context, self.page = None, None
+                self.session.headers.pop('Authorization', None)
+                self.session.headers.pop('AppVersion', None)
+                self.session.cookies.clear()
+                self.account_type = 'sub'
+                self.store.clear(method, account)
         if method == "sub":
             self._subaccount_login()
         else:
@@ -133,6 +182,22 @@ class Client:
             self.page = context.__enter__()
             self.browser_context = context
             self.account_type = "main"
+        self._save_session(method, account)
+
+    def _save_session(self, method, account):
+        from autodl_session import SessionStoreError
+        try:
+            if method == 'sub':
+                cookies = [{'name': c.name, 'value': c.value, 'domain': c.domain, 'path': c.path}
+                           for c in self.session.cookies.jar]
+                state = {'token': self.session.headers['Authorization'],
+                         'version': self.session.headers['AppVersion'], 'cookies': cookies}
+            else:
+                from autodl_auth import browser_state
+                state = browser_state(self.page)
+            self.store.save(method, state, account)
+        except (SessionStoreError, OSError) as exc:
+            print(f'AutoDL: 无法保存登录会话：{type(exc).__name__}', file=sys.stderr)
 
     def close(self):
         try:
@@ -238,6 +303,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--auth", choices=("sub", "wechat", "sms"), default="sub",
                         help="Authentication: sub-account password, WeChat QR, or SMS")
+    parser.add_argument('--fresh-login', action='store_true', help='Discard the saved session and log in again')
     sub = parser.add_subparsers(dest="command", required=True)
     list_parser = sub.add_parser("list", help="List instances with SSH commands")
     list_parser.add_argument(
@@ -246,6 +312,7 @@ def main(argv=None):
     )
     for action in ("start", "stop"):
         sub.add_parser(action, help=f"{action.title()} one instance").add_argument("uuid")
+    sub.add_parser('logout', help='Delete the saved local session for the selected account')
     add_commands(sub)
     args = parser.parse_args(argv)
 
@@ -254,7 +321,14 @@ def main(argv=None):
         if args.command == "image-billing":
             print(json.dumps(image_billing(), ensure_ascii=False, indent=2))
             return 0
-        client.login(args.auth)
+        if args.command == 'logout':
+            account = os.environ.get('AUTODL_SUB_ACCOUNT', '') if args.auth == 'sub' else ''
+            if args.auth == 'sub' and (not account or '@' not in account):
+                raise AutoDLError('Set AUTODL_SUB_ACCOUNT to <username>@<main-account-id>')
+            client.store.clear(args.auth, account)
+            print('已删除本机保存的会话')
+            return 0
+        client.login(args.auth, fresh=args.fresh_login)
         if args.command == "list":
             rows = client.instances()
             result = {"total": len(rows), "instances": [
