@@ -5,7 +5,8 @@ description: Manage ordinary AutoDL container instances and private images throu
 
 # AutoDL 实例与镜像
 
-统一使用 [scripts/autodl_instance.py](scripts/autodl_instance.py)。命令、依赖和用户登录步骤见 [README.md](README.md)。
+常规操作使用 [scripts/autodl_instance.py](scripts/autodl_instance.py)。命令、依赖和用户登录步骤见 [README.md](README.md)。
+用户要求持续抢空闲 GPU 时使用 [scripts/autodl_reserve.py](scripts/autodl_reserve.py)，先确定 GPU、最低显存、基础镜像、价格上限和等待时限；命令见 README 的「快速抢卡」。该入口缓存登录和镜像预检，直接用实时库存与一次报价生成预览并提交一次，不必再次运行常规 create 预览。
 
 ## 静默更新
 

@@ -64,11 +64,12 @@ def machine_identifier(value):
     raise AutoDLError("machine_id must be a non-empty host identifier")
 
 
-def paginated(client, resource, filters=None):
+def paginated(client, resource, filters=None, *, page_size=PAGE_SIZE):
+    integer(page_size, "page_size", 1)
     rows = []
     for page in range(1, MAX_PAGES + 1):
         data = object_data(client.api("POST", resource, {
-            **(filters or {}), "page_index": page, "page_size": PAGE_SIZE,
+            **(filters or {}), "page_index": page, "page_size": page_size,
         }))
         batch = list_data(data.get("list"))
         rows.extend(batch)
@@ -235,11 +236,16 @@ def safe_price(data):
     return result
 
 
-def prepare_order(client, config, source_uuid=None):
+def prepare_order(client, config, source_uuid=None, *, observed_machine=None,
+                  observed_base_image=None):
     cfg = normalize_config(config, clone=source_uuid is not None)
-    rows = [row for row in machines(client, machine_id=cfg["machine_id"],
-                                    charge_type=cfg["charge_type"])
-            if row.get("machine_id") == cfg["machine_id"]]
+    if source_uuid and (observed_machine is not None or observed_base_image is not None):
+        raise AutoDLError("Cached observations are only supported for new base-image instances")
+    rows = ([object_data(observed_machine)] if observed_machine is not None else
+            [row for row in machines(client, machine_id=cfg["machine_id"],
+                                     charge_type=cfg["charge_type"])
+             if row.get("machine_id") == cfg["machine_id"]])
+    rows = [row for row in rows if row.get("machine_id") == cfg["machine_id"]]
     if len(rows) != 1:
         raise AutoDLError("Target host is not uniquely available")
     machine = rows[0]
@@ -296,13 +302,16 @@ def prepare_order(client, config, source_uuid=None):
         context["image"] = select(img, IMAGE_FIELDS)
     else:
         if cfg["private_image_uuid"]:
+            if observed_base_image is not None:
+                raise AutoDLError("A cached base image cannot be used as a private image")
             pool = list_data(client.api("POST", "image/private/get", {
                 "cpu_arch": [machine["cpu_arch"]],
                 "chip_corp": [] if machine["chip_corp"] == "cpu" else [machine["chip_corp"]],
             }))
             matches = [row for row in pool if row.get("image_uuid") == cfg["private_image_uuid"]]
         else:
-            pool = list_data(client.api("POST", "image/get", {"image_uuid": cfg["base_image_uuid"]}))
+            pool = ([object_data(observed_base_image)] if observed_base_image is not None else
+                    list_data(client.api("POST", "image/get", {"image_uuid": cfg["base_image_uuid"]})))
             matches = [row for row in pool if row.get("uuid") == cfg["base_image_uuid"]]
         if len(matches) != 1:
             raise AutoDLError("Selected image is not uniquely available to this sub-account")
